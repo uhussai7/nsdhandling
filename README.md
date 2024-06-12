@@ -1,2 +1,2 @@
 ## nsdhandling
-Classes to help load the Natural Scenes Dataset
+Classes to help wrangle the Natural Scenes Dataset
