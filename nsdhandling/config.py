@@ -1,5 +1,7 @@
 import os
 
+
+
 #Please define root paths
 NSD_ROOT=os.environ.get('NSD_ROOT_PATH') #set NSD_ROOT_PATH as environment variable 
 BETA_ROOT=os.path.join(NSD_ROOT,'nsddata_betas','ppdata')
@@ -8,7 +10,7 @@ STIM_ROOT=os.path.join(NSD_ROOT,'nsddata_stimuli','stimuli','nsd')
 FREESURFER_ROOT=os.path.join(NSD_ROOT,'freesurfer') #freesurfer path for nsd subjects
 #NSD_PREPROC=os.path.join(NSD_ROOT,'nsd_preproc')
 SCRATCH_PATH=os.environ.get('SCRATCH_PATH') #using scratch for now
-NSD_PREPROC=os.path.join(SCRATCH_PATH,'nsd_preproc') #using scratch for now
+NSD_PREPROC=os.path.join(SCRATCH_PATH,'nsd_preproc') #using scratch for now TODO: this should just be an envvironment variable
 
 #Files
 EXP_DESIGN_FILE=os.path.join(NSD_ROOT,'nsddata','experiments','nsd','nsd_expdesign.mat')

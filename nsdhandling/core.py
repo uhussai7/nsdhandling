@@ -10,6 +10,9 @@ from .utils.roi_utils import update_mask,update_roi_dic,combine_basic_rois
 from .utils.nsd_orig.load_nsd import load_betas,data_split,image_feature_fn
 from pathlib import Path
 from torchvision.transforms import Resize, Compose
+from torch.utils.data import TensorDataset, DataLoader
+from torch import from_numpy as from_np
+
 
 #check how imgs_per_subject is stored
 #and confusion about subject indices
@@ -88,21 +91,56 @@ class NsdData:
                 this_this_path=os.path.join(this_path,key+'.npy')
                 np.save(this_this_path,d[key])
 
-    def load_preprocessed(self,load_path=NSD_PREPROC):
+    def load_preprocessed(self,input_size,xfms=[],load_path=NSD_PREPROC):
         """
         Load preprocessed (roi only) data, populates self.data
 
         Args:
             load_path: path to preprocessed data, default is NSD_PREPROC
         """
+        self.xfms=Compose(xfms + [Resize(input_size),])
         self.data=[]
         for subj in self.subj_list:
+            print('Loading from folder:%s'%(load_path+ '/subj%02d'%int(subj)))
             keys=os.listdir(load_path+ '/subj%02d'%int(subj))
             keys=[k.split('.npy')[0] for k in keys]
             this_dic={}
             for key in keys:
+                print('Loading:',key)
                 this_dic[key]=np.load(load_path + '/subj%02d/'%int(subj) +key + '.npy',allow_pickle=True)
             self.data.append(this_dic)
+        
+    def make_data_loaders(self,*args,**kwargs):
+        self.data_loaders_train=[]
+        self.data_loaders_val_single=[]
+        self.data_loaders_val_multi=[]
+        for data in self.data:
+            this_dataloader_train=DataLoader(TensorDataset(
+                                                self.xfms(from_np(data['train_stim'])),
+                                                from_np(data['train_vox']),
+                                                ),
+                                                *args,
+                                                shuffle=True,**kwargs
+                                            )
+
+            this_dataloader_val_single=DataLoader(TensorDataset(
+                                            self.xfms(from_np(data['val_stim_single'])),
+                                            from_np(data['val_vox_single']),
+                                            ),
+                                            *args,
+                                            **kwargs
+                                        )      
+
+            this_dataloader_val_multi=DataLoader(TensorDataset(
+                                        self.xfms(from_np(data['val_stim_multi'])),
+                                        from_np(data['val_vox_multi']),
+                                        ),
+                                        *args,
+                                        **kwargs
+                                    )
+        self.data_loaders_train.append(this_dataloader_train)
+        self.data_loaders_val_single.append(this_dataloader_val_single)
+        self.data_loaders_val_multi.append(this_dataloader_val_multi)
 
 
 class StimData:
@@ -146,9 +184,6 @@ class StimData:
         
         self.images_per_subject=images_per_subject
 
-        #need something here to save subject and resolution specific stims like before
-        #maybe we consider loading the data as neeeded before each training session?
-
 class BrainData: #this is done per subject as it carries fields for masks, etc. Can be wrapped in another class if needed
     """
     Operations for raw brain data per subject
@@ -171,7 +206,7 @@ class BrainData: #this is done per subject as it carries fields for masks, etc. 
         Args: 
             subj: Subject id
             roi_list: List of rois to add in addition to basic rois
-
+    
         Returns:
             voxel_mask: Flattened voxel mask
             voxel_ncsnr: Flattened noise ceiling array
