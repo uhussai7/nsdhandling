@@ -12,10 +12,11 @@ from pathlib import Path
 from torchvision.transforms import Resize, Compose
 from torch.utils.data import TensorDataset, DataLoader
 from torch import from_numpy as from_np
+import pandas as pd
+import json
+from collections import defaultdict
+from pycocotools.coco import COCO
 
-
-#check how imgs_per_subject is stored
-#and confusion about subject indices
 
 def load_exp_design(A):
     """
@@ -51,10 +52,11 @@ class NsdData:
 
             trn_stim_data, trn_voxel_data,\
             val_stim_single_trial_data, val_voxel_single_trial_data,\
-            val_stim_multi_trial_data, val_voxel_multi_trial_data = \
+            val_stim_multi_trial_data, val_voxel_multi_trial_data, \
+            self.trn_inds,self.val_stim_inds_st,self.val_stim_inds_mt=\
             data_split(image_feature_fn(self.stim_data.images_per_subject[s_ind].detach().cpu().numpy()),
                        this_subj_brain_data.voxel_data, 
-                       ordering, imagewise=False)
+                       ordering, imagewise=False) #this needs to return the index mapping also so that we can split the caption indices
 
             this_output_dictionary={
                 'subject':subj,
@@ -70,10 +72,30 @@ class NsdData:
                 'voxel_mask':this_subj_brain_data.voxel_mask,
                 'upto': this_subj_brain_data.upto,
                 'Nv': this_subj_brain_data.Nv,
-                'roi_dic_combined':this_subj_brain_data.roi_dic_combined
+                'roi_dic_combined':this_subj_brain_data.roi_dic_combined,
+                'train_stim_captions': self.get_coco_captions(self.stim_data.cocoId_arr['subj%d'%(subj)][self.trn_inds]),
+                'val_stim_st_captions':self.get_coco_captions(self.stim_data.cocoId_arr['subj%d'%(subj)][self.val_stim_inds_st]),
+                'val_stim_mt_captions':self.get_coco_captions(self.stim_data.cocoId_arr['subj%d'%(subj)][self.val_stim_inds_mt]),
+                'train_stim_cocoId': self.stim_data.cocoId_arr['subj%d'%(subj)][self.trn_inds],
+                'val_stim_st_cocoId': self.stim_data.cocoId_arr['subj%d'%(subj)][self.val_stim_inds_st],
+                'val_stim_mt_cocoId': self.stim_data.cocoId_arr['subj%d'%(subj)][self.val_stim_inds_mt]
              }
             self.data.append(this_output_dictionary)
     
+    def get_coco_captions(self,cocoIds,max_captions=5):
+        coconut=COCO(COCO_TRN_ANN)
+        coconut2=COCO(COCO_VAL_ANN)
+        captions=[]
+        for coco_id in cocoIds:
+            anns_ids=coconut.loadAnns(coconut.getAnnIds(coco_id))
+            these_captions=[caption['caption'] for caption in coconut.loadAnns(coconut.getAnnIds(coco_id))]
+            if len(these_captions)<5:
+                these_captions=[caption['caption'] for caption in coconut2.loadAnns(coconut2.getAnnIds(coco_id))]
+            if len(these_captions)<5:
+                raise Exception('Sorry, where do I get captions from?')
+            captions.append(these_captions[:max_captions])
+        return captions
+
     def save_preprocessed(self,save_path=NSD_PREPROC):
         """
         Save data from rois only
@@ -88,6 +110,7 @@ class NsdData:
             this_path=os.path.join(save_path,"subj%02d"%subj)
             Path(this_path).mkdir(parents=True,exist_ok=True)
             for key in d.keys():
+                print('Saving %s'%key)
                 this_this_path=os.path.join(this_path,key+'.npy')
                 np.save(this_this_path,d[key])
 
@@ -109,46 +132,144 @@ class NsdData:
                 print('Loading:',key)
                 this_dic[key]=np.load(load_path + '/subj%02d/'%int(subj) +key + '.npy',allow_pickle=True)
             self.data.append(this_dic)
-        
-    def make_data_loaders(self,*args,**kwargs):
+
+    def make_data_loaders(self,text=False,tokenizer=None,tokenizer_batch_size=16,*args,**kwargs): #TODO documentation
         self.data_loaders_train=[]
         self.data_loaders_val_single=[]
         self.data_loaders_val_multi=[]
-        for data in self.data:
-            this_dataloader_train=DataLoader(TensorDataset(
-                                                self.xfms(from_np(data['train_stim'])),
-                                                from_np(data['train_vox']),
+        if text==False:
+            for data in self.data:
+                this_dataloader_train=DataLoader(TensorDataset(
+                                                    self.xfms(from_np(data['train_stim'])),
+                                                    from_np(data['train_vox']),
+                                                    ),
+                                                    *args,
+                                                    shuffle=True,**kwargs
+                                                )
+
+                this_dataloader_val_single=DataLoader(TensorDataset(
+                                                self.xfms(from_np(data['val_stim_single'])),
+                                                from_np(data['val_vox_single']),
                                                 ),
                                                 *args,
-                                                shuffle=True,**kwargs
-                                            )
+                                                **kwargs
+                                            )      
 
-            this_dataloader_val_single=DataLoader(TensorDataset(
-                                            self.xfms(from_np(data['val_stim_single'])),
-                                            from_np(data['val_vox_single']),
+                this_dataloader_val_multi=DataLoader(TensorDataset(
+                                            self.xfms(from_np(data['val_stim_multi'])),
+                                            from_np(data['val_vox_multi']),
                                             ),
                                             *args,
                                             **kwargs
-                                        )      
+                                        )
+        else:
+            def tokenizer_(x,f=tokenizer,batch_size=tokenizer_batch_size): #have to tokenzie batch wise x has shape [N,N_captions]
+                out=[]
+                N_total,N_captions=x.shape[0],x.shape[1]
+                for i in range(0,len(x),batch_size):
+                    out.append(f(x[i:i+batch_size].flatten()))
+                return torch.cat(out).reshape(N_total,N_captions,-1)
+            for data in self.data:
+                this_dataloader_train=DataLoader(TensorDataset(
+                                                    tokenizer_(data['train_stim_captions']),
+                                                    from_np(data['train_vox']),
+                                                    ),
+                                                    *args,
+                                                    shuffle=True,**kwargs
+                                                )
 
-            this_dataloader_val_multi=DataLoader(TensorDataset(
-                                        self.xfms(from_np(data['val_stim_multi'])),
-                                        from_np(data['val_vox_multi']),
-                                        ),
-                                        *args,
-                                        **kwargs
-                                    )
+                this_dataloader_val_single=DataLoader(TensorDataset(
+                                                tokenizer_(data['val_stim_st_captions']),
+                                                from_np(data['val_vox_single']),
+                                                ),
+                                                *args,
+                                                **kwargs
+                                            )      
+
+                this_dataloader_val_multi=DataLoader(TensorDataset(
+                                            tokenizer_(data['val_stim_mt_captions']),
+                                            from_np(data['val_vox_multi']),
+                                            ),
+                                            *args,
+                                            **kwargs
+                                        )
+
+
         self.data_loaders_train.append(this_dataloader_train)
         self.data_loaders_val_single.append(this_dataloader_val_single)
         self.data_loaders_val_multi.append(this_dataloader_val_multi)
+
+
+    # def make_data_loaders(self,text=False,tokenizer=lambda x: from_np(x),tokenizer_batch_size=16,*args,**kwargs): #TODO: need documentation for this (place importance on passing tokenizer)
+    #     self.data_loaders_train=[]
+    #     self.data_loaders_val_single=[]
+    #     self.data_loaders_val_multi=[]
+
+    #     train_stim,val_stim_single,val_stim_multi='train_stim','val_stim_single',\
+    #                                                 'val_stim_multi'
+    #     tokenizer_=tokenizer
+    #     if text==True:
+    #         train_stim,val_stim_single,val_stim_multi='train_stim_captions','val_stim_st_captions',\
+    #                                                    'val_stim_mt_captions'
+    #         self.xfms=lambda x:x
+    #         #N_total,N_captions=self.data[0][train_stim].shape #just getting the shape
+    #         #tokenizer= lambda x: torch.cat([tokenizer(x[i:i+tokenizer_batch_size].flatten()) for i in range(0,N_total,tokenizer_batch_size)]).reshape(N_total,N_captions,-1)
+    #         def tokenizer_(x,f=tokenizer,batch_size=tokenizer_batch_size): #have to tokenzie batch wise x has shape [N,N_captions]
+    #             out=[]
+    #             N_total,N_captions=x.shape[0],x.shape[1]
+    #             for i in range(0,len(x),batch_size):
+    #                 out.append(f(x[i:i+batch_size].flatten()))
+    #             return torch.cat(out).reshape(N_total,N_captions,-1)
+    #         #tokenizer = lambda x: tokenizer(x.flatten()).reshape(N_total,N_captions,-1) 
+    #     for data in self.data:
+    #         this_dataloader_train=DataLoader(TensorDataset(
+    #                                             self.xfms(tokenizer_(data[train_stim])),
+    #                                             from_np(data['train_vox']),
+    #                                             ),
+    #                                             *args,
+    #                                             shuffle=True,**kwargs
+    #                                         )
+    #         del data[train_stim]
+    #         del data['train_vox']
+
+    #         this_dataloader_val_single=DataLoader(TensorDataset(
+    #                                         self.xfms(tokenizer_(data[val_stim_single])),
+    #                                         from_np(data['val_vox_single']),
+    #                                         ),
+    #                                         *args,
+    #                                         **kwargs
+    #                                     )      
+
+    #         del data[val_stim_single]
+    #         del data['val_vox_single']
+
+    #         this_dataloader_val_multi=DataLoader(TensorDataset(
+    #                                     self.xfms(tokenizer_(data[val_stim_multi])),
+    #                                     from_np(data['val_vox_multi']),
+    #                                     ),
+    #                                     *args,
+    #                                     **kwargs
+    #                                 )
+
+    #         del data[val_stim_multi]
+    #         del data['val_vox_multi']
+
+    #     self.data_loaders_train.append(this_dataloader_train)
+    #     self.data_loaders_val_single.append(this_dataloader_val_single)
+    #     self.data_loaders_val_multi.append(this_dataloader_val_multi)
 
 
 class StimData:
     """
     Operations for raw stimulus (image) data 
     """
-    def __init__(self):
+    def __init__(self,subj_list=None):
         load_exp_design(self)
+        self.subj_list=subj_list
+        if subj_list is not None:
+            print('Loading stims and captions. This can take some time...')
+            self.load_stimuli_raw(self.subj_list)
+            self.get_cocoinds(self.subj_list)
 
     def load_stimuli_raw(self,subj_list,size=(256,256),xfms=[]):
         """
@@ -169,6 +290,7 @@ class StimData:
         self.subj_list=subj_list
         images_per_subject=[]
         image_data = h5py.File(STIM_FILE,'r')['imgBrick']
+        #image_info = pd.read_pickle(STIM_INFO_FILE) 
         for subj in subj_list:
             subj=int(subj)-1 #just to ensure these are ints
             img_ids=self.subject_idx[subj]-1
@@ -183,6 +305,21 @@ class StimData:
             images_per_subject.append(self.xfms(torch.from_numpy(extracted_image_data.transpose(0,3,1,2))))
         
         self.images_per_subject=images_per_subject
+
+    def get_cocoinds(self,subj_list):
+        """
+        TODO: Documentation for this function
+        """
+        #we just need to get coco inds
+
+        stiminfo=pd.read_pickle(STIM_INFO_FILE)
+        self.cocoId_arr = {'subj%d'%subj : np.zeros(self.subject_idx.shape[-1],dtype=int) for subj in subj_list}
+        for j,subj in enumerate(subj_list):
+            cocoId = np.array(stiminfo['cocoId'])[stiminfo['subject%d'%(subj)].astype(bool)]
+            nsdId = np.array(stiminfo['nsdId'])[stiminfo['subject%d'%(subj)].astype(bool)]
+            imageId = self.subject_idx[subj-1]-1
+            for i,k in enumerate(imageId):
+                self.cocoId_arr['subj%d'%subj][i] = (cocoId[nsdId==k])[0]
 
 class BrainData: #this is done per subject as it carries fields for masks, etc. Can be wrapped in another class if needed
     """

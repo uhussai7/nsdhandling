@@ -125,6 +125,10 @@ def data_split(stim, voxel, ordering, imagewise=True):
     val_voxel_st = voxel[shared_mask]
     val_stim_st = stim[ordering_data[shared_mask]]
 
+    out_inds=np.arange(0,len(stim)) #this is a modification to return inds for captions
+    val_stim_inds_st=out_inds[ordering_data[shared_mask]]
+
+
     idx, idx_count = np.unique(ordering_data, return_counts=True)
     idx_list = [ordering_data == i for i in idx]
     voxel_avg_data = np.zeros(shape=(len(idx), nv), dtype=np.float32)
@@ -134,15 +138,23 @@ def data_split(stim, voxel, ordering, imagewise=True):
 
     val_voxel_mt = voxel_avg_data[shared_mask_mt]
     val_stim_mt = stim[idx][shared_mask_mt]
+    
+    val_stim_inds_mt=out_inds[idx][shared_mask_mt]
 
     if imagewise:
         trn_voxel = voxel_avg_data[~shared_mask_mt]
         trn_stim = stim[idx][~shared_mask_mt]
-        return trn_stim, trn_voxel, val_stim_st, val_voxel_st, val_stim_mt, val_voxel_mt
+
+        trn_inds=out_inds[idx][~shared_mask_mt]
+
+        return trn_stim, trn_voxel, val_stim_st, val_voxel_st, val_stim_mt, val_voxel_mt,trn_inds,val_stim_inds_st,val_stim_inds_mt
     else:
         trn_voxel = voxel[~shared_mask]
         trn_stim = stim[ordering_data[~shared_mask]]
-        return trn_stim, trn_voxel, val_stim_st, val_voxel_st, val_stim_mt, val_voxel_mt
+
+        trn_inds=out_inds[ordering_data[~shared_mask]]
+        
+        return trn_stim, trn_voxel, val_stim_st, val_voxel_st, val_stim_mt, val_voxel_mt,trn_inds,val_stim_inds_st,val_stim_inds_mt
 
 ##mods for kamitani data
 

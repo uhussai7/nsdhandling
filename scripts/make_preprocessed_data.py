@@ -19,13 +19,13 @@ print('Loading from %d sessions'%upto)
 
 #load the stimulus
 print('Loading raw stim data...')
-stim_data=core.StimData()
+stim_data=core.StimData([int(subj)])
 print('Done.')
 
 #load the fmri data
-subj_list=[subj]
+subj_list=[int(subj)]
 print('Loading fmri data')
-stim_data.load_stimuli_raw(subj_list)
+#stim_data.load_stimuli_raw(subj_list)
 nsd_data=core.NsdData(subj_list,upto=upto)
 nsd_data.load_from_raw(stim_data)
 print('Done.')

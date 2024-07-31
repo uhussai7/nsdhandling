@@ -10,11 +10,16 @@ STIM_ROOT=os.path.join(NSD_ROOT,'nsddata_stimuli','stimuli','nsd')
 FREESURFER_ROOT=os.path.join(NSD_ROOT,'freesurfer') #freesurfer path for nsd subjects
 #NSD_PREPROC=os.path.join(NSD_ROOT,'nsd_preproc')
 SCRATCH_PATH=os.environ.get('SCRATCH_PATH') #using scratch for now
-NSD_PREPROC=os.path.join(SCRATCH_PATH,'nsd_preproc') #using scratch for now TODO: this should just be an envvironment variable
+#NSD_PREPROC=os.path.join(SCRATCH_PATH,'nsd_preproc') #using scratch for now 
+NSD_PREPROC=os.environ.get('NSD_PREPROC_PATH') #set NSD_ROOT_PATH as environment variable 
+
 
 #Files
 EXP_DESIGN_FILE=os.path.join(NSD_ROOT,'nsddata','experiments','nsd','nsd_expdesign.mat')
 STIM_FILE=os.path.join(STIM_ROOT,'nsd_stimuli.hdf5')
+STIM_INFO_FILE=os.path.join(NSD_ROOT,'nsddata','experiments','nsd','nsd_stim_info_merged.pkl')
+COCO_TRN_ANN=os.path.join(NSD_ROOT,'coco_anns','captions_train2017.json')
+COCO_VAL_ANN=os.path.join(NSD_ROOT,'coco_anns','captions_val2017.json')
 
 #Fmri data parameters
 FUNC_RES='func1pt8mm'
